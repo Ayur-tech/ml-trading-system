@@ -1,4 +1,3 @@
-# ml-trading-system
 """
 ML Trading System — Functional Version
 ------------------------------------
