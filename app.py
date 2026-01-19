@@ -1,122 +1,93 @@
-# ============================================
-# ML Trading System — Clean Functional Version
-# ============================================
+# app.py
 
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import yfinance as yf
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
 
-# ---------------- CONFIG ---------------- #
-SYMBOLS = ["BTC-USD", "ETH-USD"]
-DEFAULT_THRESHOLD = 0.6
-
-# ---------------- DATA ---------------- #
-def fetch_data(symbol):
-    df = yf.download(symbol, period="6mo", interval="1d")
-    df.dropna(inplace=True)
-    return df
-
-# ---------------- FEATURES ---------------- #
-def build_features(df):
-    df = df.copy()
-    df["SMA5"] = df["Close"].rolling(5).mean()
-    df["SMA10"] = df["Close"].rolling(10).mean()
-    df["Return"] = df["Close"].pct_change()
-    df.dropna(inplace=True)
-    return df
-
-# ---------------- MODEL ---------------- #
-def train_model(df):
-    df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
-
-    X = df[["SMA5", "SMA10", "Return"]][:-1]
-    y = df["Target"][:-1]
-
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X, y)
-
-    return model
-
-# ---------------- SIGNAL ---------------- #
-def predict_signal(df, model, threshold):
-    latest = df.iloc[-1]
-    X = latest[["SMA5", "SMA10", "Return"]].values.reshape(1, -1)
-
-    prob = model.predict_proba(X)[0][1]
-
-    if prob >= threshold:
-        signal = "BUY"
-    elif prob <= (1 - threshold):
-        signal = "SELL"
-    else:
-        signal = "NO TRADE"
-
-    return latest["Close"], prob, signal
-
-# ---------------- BACKTEST ---------------- #
-def backtest(df, model, threshold):
-    wins = 0
-    trades = 0
-
-    for i in range(len(df) - 1):
-        X = df[["SMA5", "SMA10", "Return"]].iloc[i:i+1]
-        prob = model.predict_proba(X)[0][1]
-
-        if prob >= threshold:
-            trades += 1
-            if df["Close"].iloc[i+1] > df["Close"].iloc[i]:
-                wins += 1
-
-        elif prob <= (1 - threshold):
-            trades += 1
-            if df["Close"].iloc[i+1] < df["Close"].iloc[i]:
-                wins += 1
-
-    winrate = (wins / trades * 100) if trades > 0 else 0
-
-    return {
-        "Trades": trades,
-        "Wins": wins,
-        "Winrate %": round(winrate, 2)
-    }
-
-# ---------------- PIPELINE ---------------- #
-def run_pipeline(symbol, threshold):
-    df = fetch_data(symbol)
-
-    if df.empty or len(df) < 60:
-        raise ValueError("Not enough market data.")
-
-    df = build_features(df)
-    model = train_model(df)
-    price, prob, signal = predict_signal(df, model, threshold)
-    stats = backtest(df, model, threshold)
-
-    return df, price, prob, signal, stats
-
-# ---------------- STREAMLIT UI ---------------- #
 st.set_page_config(page_title="ML Trading System", layout="wide")
-st.title("📈 ML Trading System — Functional Version")
 
-symbol = st.selectbox("Symbol", SYMBOLS)
-threshold = st.slider("Confidence Threshold", 0.50, 0.90, DEFAULT_THRESHOLD, 0.01)
+st.title("ML Trading System — Clean Functional Version")
 
-try:
-    df, price, prob, signal, stats = run_pipeline(symbol, threshold)
+# -----------------------------
+# Sidebar Controls
+# -----------------------------
+symbol = st.selectbox("Symbol", ["BTC-USD", "ETH-USD", "AAPL", "TSLA", "MSFT"])
+confidence_threshold = st.slider("Confidence Threshold", 0.50, 0.90, 0.60)
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Price", f"${price:,.2f}")
-    c2.metric("Probability Up", f"{prob*100:.2f}%")
-    c3.metric("Signal", signal)
+# -----------------------------
+# Load Data
+# -----------------------------
+@st.cache_data
+def load_data(sym):
+    df = yf.download(sym, period="1y", interval="1d")
+    df.dropna(inplace=True)
+    return df
 
-    st.subheader("Backtest Performance")
-    st.json(stats)
+df = load_data(symbol)
 
-    st.subheader("Price Chart")
-    st.line_chart(df["Close"])
+st.subheader("Market Data")
+st.dataframe(df.tail())
 
-except Exception as e:
-    st.error(str(e))
+# -----------------------------
+# Feature Engineering
+# -----------------------------
+df["return"] = df["Close"].pct_change()
+df["ma10"] = df["Close"].rolling(10).mean()
+df["ma20"] = df["Close"].rolling(20).mean()
+df["volatility"] = df["return"].rolling(10).std()
+
+df.dropna(inplace=True)
+
+df["target"] = np.where(df["Close"].shift(-1) > df["Close"], 1, 0)
+
+features = ["return", "ma10", "ma20", "volatility"]
+X = df[features]
+y = df["target"]
+
+# -----------------------------
+# Train Model
+# -----------------------------
+X_train, X_test, y_train, y_test = train_test_split(X, y, shuffle=False, test_size=0.2)
+
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+accuracy = model.score(X_test, y_test)
+
+st.subheader("Model Accuracy")
+st.write(f"{accuracy:.2%}")
+
+# -----------------------------
+# Prediction
+# -----------------------------
+latest_features = X.iloc[-1:].values
+prediction = model.predict(latest_features)[0]
+proba = model.predict_proba(latest_features)[0]
+confidence = np.max(proba)
+
+# -----------------------------
+# Trading Decision (NO Series used in if)
+# -----------------------------
+st.subheader("AI Trading Signal")
+
+if confidence < confidence_threshold:
+    st.warning("HOLD — Low confidence")
+else:
+    if prediction == 1:
+        st.success(f"BUY — Confidence: {confidence:.2%}")
+    else:
+        st.error(f"SELL — Confidence: {confidence:.2%}")
+
+# -----------------------------
+# Charts
+# -----------------------------
+st.subheader("Price Chart")
+st.line_chart(df["Close"])
+
+st.subheader("Moving Averages")
+st.line_chart(df[["Close", "ma10", "ma20"]])
+
 
