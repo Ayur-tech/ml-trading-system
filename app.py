@@ -10,6 +10,11 @@ st.title("📈 ML Trading System — Functional Version")
 
 # ---------------- UI ----------------
 symbol = st.selectbox("Symbol", ["BTC-USD", "ETH-USD", "SOL-USD"])
+# Safety: force symbol to string (kills tuple bug permanently)
+if isinstance(symbol, (list, tuple)):
+    symbol = symbol[0]
+symbol = str(symbol)
+
 threshold = st.slider("Confidence Threshold", 0.50, 0.90, 0.60, 0.01)
 
 # ---------------- DATA ----------------
