@@ -88,6 +88,12 @@ st.subheader("Price Chart")
 st.line_chart(df["Close"])
 
 st.subheader("Moving Averages")
-st.line_chart(df[["Close", "ma10", "ma20"]])
+required_cols = ["close", "ma10", "ma20"]
+
+if all(col in df.columns for col in required_cols):
+    st.line_chart(df[required_cols])
+else:
+    st.error(f"Missing columns: {set(required_cols) - set(df.columns)}")
+
 
 
