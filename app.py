@@ -1,126 +1,124 @@
+# app.py
+# Indian Stock Market Trading Dashboard (NSE)
+# Author: Your AI Trading System
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
+import numpy as np
 
-# ---------------- CONFIG ----------------
-st.set_page_config(page_title="AI Trading Terminal", layout="wide")
+# ----------------------------
+# PAGE CONFIG
+# ----------------------------
+st.set_page_config(
+    page_title="Indian Stock Market Trading System",
+    page_icon="📊",
+    layout="wide"
+)
 
-# ---------------- SAFE DATA ENGINE ----------------
+st.title("📊 Indian Stock Market Trading System (NSE)")
+st.caption("Professional AI-ready trading dashboard for Indian markets")
+
+# ----------------------------
+# USER INPUT
+# ----------------------------
+symbol = st.text_input("Enter NSE stock symbol (example: RELIANCE, TCS, INFY)", "RELIANCE")
+days = st.slider("Select historical period (days)", 30, 365, 120)
+
+ticker = symbol.upper().strip() + ".NS"
+st.info(f"Selected stock: {ticker}")
+
+# ----------------------------
+# DATA FETCH
+# ----------------------------
 @st.cache_data(ttl=300)
-def load_data(symbol, days=180, interval="1d"):
-    end = datetime.now()
-    start = end - timedelta(days=days)
+def load_data(ticker, days):
+    df = yf.download(ticker, period=f"{days}d", interval="1d")
+    return df
 
-    symbols_to_try = [symbol, symbol.replace(".NS", ".BO")]
+df = load_data(ticker, days)
 
-    for sym in symbols_to_try:
-        try:
-            df = yf.download(
-                sym,
-                start=start,
-                end=end,
-                interval=interval,
-                progress=False,
-                auto_adjust=True,
-                threads=False
-            )
-            if not df.empty:
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
-                return df, sym
-        except:
-            pass
+if df.empty:
+    st.error("No data found. Please check the NSE symbol.")
+    st.stop()
 
-    return pd.DataFrame(), None
+# ----------------------------
+# INDICATORS
+# ----------------------------
+df["MA20"] = df["Close"].rolling(20).mean()
+df["MA50"] = df["Close"].rolling(50).mean()
 
+delta = df["Close"].diff()
+gain = delta.where(delta > 0, 0.0)
+loss = -delta.where(delta < 0, 0.0)
 
-# ---------------- MARKET LISTS ----------------
-NIFTY50 = [
-    "RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","ITC.NS",
-    "LT.NS","SBIN.NS","AXISBANK.NS","KOTAKBANK.NS","BAJFINANCE.NS","HINDUNILVR.NS",
-    "BHARTIARTL.NS","ASIANPAINT.NS","HCLTECH.NS","MARUTI.NS","SUNPHARMA.NS"
-]
+avg_gain = gain.rolling(14).mean()
+avg_loss = loss.rolling(14).mean()
+rs = avg_gain / avg_loss
+df["RSI"] = 100 - (100 / (1 + rs))
 
-CRYPTO = ["BTC-USD","ETH-USD","BNB-USD","SOL-USD","XRP-USD","ADA-USD","DOGE-USD"]
+df = df.dropna()
 
-# ---------------- UI ----------------
-st.title("📊 AI Trading Terminal")
-st.caption("Indian Market + Crypto | Professional Functional Base")
+latest = df.iloc[-1]
+price = float(latest["Close"])
+ma20 = float(latest["MA20"])
+ma50 = float(latest["MA50"])
+rsi = float(latest["RSI"])
 
-tab1, tab2, tab3 = st.tabs(["🇮🇳 Indian Market", "🪙 Crypto Market", "📈 Market Browser"])
+# ----------------------------
+# SIGNAL LOGIC
+# ----------------------------
+if ma20 > ma50 and rsi < 70:
+    signal = "BUY"
+elif ma20 < ma50 and rsi > 30:
+    signal = "SELL"
+else:
+    signal = "HOLD"
 
-# ---------------- INDIAN MARKET ----------------
-with tab1:
-    col1, col2 = st.columns([2,1])
+# Confidence score (simple model)
+confidence = min(abs(ma20 - ma50) / ma50 * 100 + abs(50 - rsi), 100)
 
-    with col1:
-        symbol = st.text_input("Enter NSE Stock (RELIANCE, TCS, INFY)", "RELIANCE")
-    with col2:
-        days = st.slider("Historical Days", 30, 1000, 180)
+# ----------------------------
+# SIGNAL DISPLAY
+# ----------------------------
+def show_signal(signal):
+    if signal == "BUY":
+        st.image("https://cdn-icons-png.flaticon.com/512/190/190411.png", width=90)
+        st.success("BUY SIGNAL — Bullish trend detected")
 
-    symbol = symbol.upper().strip()
-    if not symbol.endswith(".NS") and not symbol.startswith("^"):
-        symbol = symbol + ".NS"
+    elif signal == "SELL":
+        st.image("https://cdn-icons-png.flaticon.com/512/190/190406.png", width=90)
+        st.error("SELL SIGNAL — Bearish trend detected")
 
-    df, used = load_data(symbol, days)
-
-    if used:
-        st.success(f"Live source: {used}")
-
-    if df.empty:
-        st.error("No market data received.")
     else:
-        st.subheader("Price Chart")
-        st.line_chart(df["Close"])
+        st.image("https://cdn-icons-png.flaticon.com/512/190/190422.png", width=90)
+        st.warning("HOLD — No strong trend detected")
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Last Price", round(df["Close"].iloc[-1],2))
-        c2.metric("Day High", round(df["High"].iloc[-1],2))
-        c3.metric("Day Low", round(df["Low"].iloc[-1],2))
+# ----------------------------
+# DASHBOARD LAYOUT
+# ----------------------------
+col1, col2 = st.columns([1.2, 2])
 
-        st.subheader("Raw Market Data")
-        st.dataframe(df.tail(20), use_container_width=True)
+with col1:
+    st.subheader("📌 Decision Panel")
+    show_signal(signal)
 
-# ---------------- CRYPTO MARKET ----------------
-with tab2:
-    crypto = st.selectbox("Select Crypto", CRYPTO)
-    days = st.slider("Days", 30, 1000, 180, key="crypto")
+    st.metric("Live Price", f"₹{price:,.2f}")
+    st.metric("MA20", f"₹{ma20:,.2f}")
+    st.metric("MA50", f"₹{ma50:,.2f}")
+    st.metric("RSI", f"{rsi:.2f}")
+    st.progress(confidence / 100)
+    st.caption(f"Confidence Score: {confidence:.1f}%")
 
-    df, used = load_data(crypto, days, "1d")
+    st.warning("⚠ This system is for educational purposes only. Not financial advice.")
 
-    if df.empty:
-        st.error("Crypto data unavailable.")
-    else:
-        st.success(f"Source: {used}")
-        st.line_chart(df["Close"])
-        st.dataframe(df.tail(15), use_container_width=True)
+with col2:
+    st.subheader("📈 Price & Moving Averages")
+    st.line_chart(df[["Close", "MA20", "MA50"]])
 
-# ---------------- MARKET BROWSER ----------------
-with tab3:
-    st.subheader("NIFTY 50 Snapshot")
-
-    market_data = {}
-
-    with st.spinner("Fetching market..."):
-        for stock in NIFTY50:
-            df, _ = load_data(stock, 7)
-            if not df.empty:
-                market_data[stock] = df["Close"].iloc[-1]
-
-    if market_data:
-        market_df = pd.DataFrame(market_data.items(), columns=["Stock", "Last Price"])
-        st.dataframe(market_df, use_container_width=True)
-
-    st.subheader("Indices")
-    i1, _ = load_data("^NSEI", 30)
-    i2, _ = load_data("^NSEBANK", 30)
-
-    if not i1.empty:
-        st.write("NIFTY 50")
-        st.line_chart(i1["Close"])
-
-    if not i2.empty:
-        st.write("BANK NIFTY")
-        st.line_chart(i2["Close"])
+# ----------------------------
+# DATA VIEW
+# ----------------------------
+with st.expander("📄 View Raw Market Data"):
+    st.dataframe(df.tail(20), use_container_width=True)
 
