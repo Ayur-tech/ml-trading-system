@@ -1,92 +1,165 @@
+# ===============================
+# AI Trading Platform (India + Crypto)
+# Sidebar-based Professional System
+# ===============================
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 
-st.set_page_config(page_title="Indian Stock Trading System", page_icon="📊", layout="wide")
-st.title("📊 Indian Stock Market Trading System (NSE)")
-st.caption("Live Indian market dashboard with Buy / Sell / Hold engine")
+# -------------------------------
+# Page setup
+# -------------------------------
+st.set_page_config(
+    page_title="AI Trading Platform",
+    page_icon="📈",
+    layout="wide"
+)
 
-# ---------------- INPUT ----------------
-symbol = st.text_input("Enter NSE stock symbol (example: RELIANCE, TCS, INFY)", "RELIANCE")
-days = st.slider("Select historical period (days)", 30, 365, 120)
+st.title("📈 AI Trading Platform")
+st.caption("Indian Markets • Crypto • Market Intelligence")
+st.info("Educational use only. Not financial advice.")
 
-ticker = symbol.upper().strip() + ".NS"
-st.info(f"Selected stock: {ticker}")
+# -------------------------------
+# Sidebar
+# -------------------------------
+section = st.sidebar.radio(
+    "Navigation",
+    ["🇮🇳 Indian Stock Market", "🪙 Crypto Market", "🌍 Market Overview"]
+)
 
-# ---------------- DATA ----------------
+# -------------------------------
+# Data engine (safe)
+# -------------------------------
 @st.cache_data(ttl=300)
-def load_data(ticker, days):
-    df = yf.download(ticker, period=f"{days}d", interval="1d", auto_adjust=True)
+def fetch_data(symbol, days=180):
+    df = yf.download(symbol, period=f"{days}d", auto_adjust=True, progress=False)
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)  # ✅ FIX
-    return df
+        df.columns = df.columns.get_level_values(0)
+    return df.dropna()
 
-df = load_data(ticker, days)
+def market_snapshot(symbols: dict):
+    rows = []
+    for name, symbol in symbols.items():
+        df = fetch_data(symbol, 7)
+        if df.empty or len(df) < 2:
+            continue
+        last = float(df["Close"].iloc[-1])
+        prev = float(df["Close"].iloc[-2])
+        change = last - prev
+        pct = (change / prev) * 100
+        rows.append([name, symbol, round(last,2), round(change,2), round(pct,2)])
+    return pd.DataFrame(rows, columns=["Name","Symbol","Price","Change","Change %"])
 
-if df.empty or "Close" not in df.columns:
-    st.error("No valid market data found. Check the NSE symbol.")
-    st.stop()
+# -------------------------------
+# Symbol universes
+# -------------------------------
+NSE = {
+    "RELIANCE": "RELIANCE.NS",
+    "TCS": "TCS.NS",
+    "INFY": "INFY.NS",
+    "HDFCBANK": "HDFCBANK.NS",
+    "ICICIBANK": "ICICIBANK.NS",
+    "ITC": "ITC.NS",
+    "SBIN": "SBIN.NS",
+    "LT": "LT.NS",
+    "AXISBANK": "AXISBANK.NS",
+    "MARUTI": "MARUTI.NS"
+}
 
-# ---------------- INDICATORS ----------------
-df["MA20"] = df["Close"].rolling(20).mean()
-df["MA50"] = df["Close"].rolling(50).mean()
+CRYPTO = {
+    "Bitcoin": "BTC-USD",
+    "Ethereum": "ETH-USD",
+    "Solana": "SOL-USD",
+    "BNB": "BNB-USD",
+    "XRP": "XRP-USD"
+}
 
-delta = df["Close"].diff()
-gain = delta.clip(lower=0)
-loss = -delta.clip(upper=0)
+# -------------------------------
+# Indian Stock Market
+# -------------------------------
+if section == "🇮🇳 Indian Stock Market":
 
-rs = gain.rolling(14).mean() / loss.rolling(14).mean()
-df["RSI"] = 100 - (100 / (1 + rs))
+    st.header("🇮🇳 Indian Stock Market (NSE)")
+    st.subheader("Market Snapshot")
+    st.dataframe(market_snapshot(NSE), use_container_width=True)
 
-df.dropna(inplace=True)
+    st.divider()
 
-latest = df.iloc[-1]
-price = float(latest["Close"])
-ma20 = float(latest["MA20"])
-ma50 = float(latest["MA50"])
-rsi = float(latest["RSI"])
+    stock = st.selectbox("Select Stock", list(NSE.keys()))
+    days = st.slider("Historical data (days)", 30, 500, 180)
 
-# ---------------- SIGNAL ENGINE ----------------
-if ma20 > ma50 and rsi < 70:
-    signal = "BUY"
-elif ma20 < ma50 and rsi > 30:
-    signal = "SELL"
-else:
-    signal = "HOLD"
+    df = fetch_data(NSE[stock], days)
 
-confidence = min(abs(ma20 - ma50) / ma50 * 100 + abs(50 - rsi), 100)
+    if df.empty:
+        st.error("No data found.")
+        st.stop()
 
-# ---------------- UI ----------------
-def show_signal(sig):
-    if sig == "BUY":
-        st.image("https://cdn-icons-png.flaticon.com/512/190/190411.png", width=80)
-        st.success("BUY — Bullish trend detected")
-    elif sig == "SELL":
-        st.image("https://cdn-icons-png.flaticon.com/512/190/190406.png", width=80)
-        st.error("SELL — Bearish trend detected")
+    df["MA20"] = df["Close"].rolling(20).mean()
+    df["MA50"] = df["Close"].rolling(50).mean()
+
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["Open"], high=df["High"],
+        low=df["Low"], close=df["Close"], name="Price"
+    ))
+    fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="MA20"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["MA50"], name="MA50"))
+
+    fig.update_layout(height=600, xaxis_rangeslider_visible=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+    last = df.iloc[-1]
+    if last["MA20"] > last["MA50"]:
+        st.success("🟢 BUY SIGNAL")
+    elif last["MA20"] < last["MA50"]:
+        st.error("🔴 SELL SIGNAL")
     else:
-        st.image("https://cdn-icons-png.flaticon.com/512/190/190422.png", width=80)
-        st.warning("HOLD — Market indecision")
+        st.warning("🟡 HOLD")
 
-col1, col2 = st.columns([1.1, 2])
+# -------------------------------
+# Crypto Market
+# -------------------------------
+elif section == "🪙 Crypto Market":
 
-with col1:
-    st.subheader("📌 Decision Panel")
-    show_signal(signal)
-    st.metric("Live Price", f"₹{price:,.2f}")
-    st.metric("MA20", f"₹{ma20:,.2f}")
-    st.metric("MA50", f"₹{ma50:,.2f}")
-    st.metric("RSI", f"{rsi:.2f}")
-    st.progress(confidence / 100)
-    st.caption(f"Confidence Score: {confidence:.1f}%")
-    st.warning("⚠ Educational system only. Not financial advice.")
+    st.header("🪙 Crypto Market")
+    st.subheader("Market Snapshot")
+    st.dataframe(market_snapshot(CRYPTO), use_container_width=True)
 
-with col2:
-    st.subheader("📈 Price & Moving Averages")
-    chart_df = df[["Close", "MA20", "MA50"]].copy()
-    chart_df.columns = ["Price", "MA20", "MA50"]  # extra safety
-    st.line_chart(chart_df, use_container_width=True)
+    st.divider()
 
-with st.expander("📄 Raw NSE Data"):
-    st.dataframe(df.tail(25), use_container_width=True)
+    coin = st.selectbox("Select Crypto", list(CRYPTO.keys()))
+    days = st.slider("Historical data (days)", 30, 500, 180)
+
+    df = fetch_data(CRYPTO[coin], days)
+
+    if df.empty:
+        st.error("No data found.")
+        st.stop()
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df.index, y=df["Close"], name="Price"))
+    fig.update_layout(height=600)
+    st.plotly_chart(fig, use_container_width=True)
+
+# -------------------------------
+# Market Overview
+# -------------------------------
+else:
+
+    st.header("🌍 Global Market Overview")
+
+    indices = {
+        "NIFTY 50": "^NSEI",
+        "SENSEX": "^BSESN",
+        "S&P 500": "^GSPC",
+        "NASDAQ": "^IXIC",
+        "Dow Jones": "^DJI",
+        "Gold": "GC=F",
+        "Crude Oil": "CL=F"
+    }
+
+    st.subheader("World Market Snapshot")
+    st.dataframe(market_snapshot(indices), use_container_width=True)
