@@ -1,95 +1,126 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go
+from datetime import datetime, timedelta
 
-# ---------------- CONFIG ---------------- #
-st.set_page_config(page_title="Indian Stock Market Dashboard", layout="wide")
-st.title("📊 Indian Stock Market Dashboard (NSE)")
-st.caption("Stable functional base for a professional trading system")
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="AI Trading Terminal", layout="wide")
 
-# ---------------- SYMBOL INPUT ---------------- #
-symbol_input = st.text_input("Enter NSE Stock Symbol (example: RELIANCE, TCS, INFY)", "RELIANCE")
-symbol = symbol_input.strip().upper() + ".NS"
-
-days = st.slider("Select historical period (days)", 30, 365, 120)
-
-st.info(f"Selected stock: {symbol}")
-
-# ---------------- DATA FETCH ---------------- #
+# ---------------- SAFE DATA ENGINE ----------------
 @st.cache_data(ttl=300)
-def load_data(sym, days):
-    df = yf.download(sym, period=f"{days}d", interval="1d", auto_adjust=True)
+def load_data(symbol, days=180, interval="1d"):
+    end = datetime.now()
+    start = end - timedelta(days=days)
 
-    # Defensive fix for multi-index columns
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    symbols_to_try = [symbol, symbol.replace(".NS", ".BO")]
 
-    return df
+    for sym in symbols_to_try:
+        try:
+            df = yf.download(
+                sym,
+                start=start,
+                end=end,
+                interval=interval,
+                progress=False,
+                auto_adjust=True,
+                threads=False
+            )
+            if not df.empty:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                return df, sym
+        except:
+            pass
 
-try:
-    df = load_data(symbol, days)
+    return pd.DataFrame(), None
+
+
+# ---------------- MARKET LISTS ----------------
+NIFTY50 = [
+    "RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS","ITC.NS",
+    "LT.NS","SBIN.NS","AXISBANK.NS","KOTAKBANK.NS","BAJFINANCE.NS","HINDUNILVR.NS",
+    "BHARTIARTL.NS","ASIANPAINT.NS","HCLTECH.NS","MARUTI.NS","SUNPHARMA.NS"
+]
+
+CRYPTO = ["BTC-USD","ETH-USD","BNB-USD","SOL-USD","XRP-USD","ADA-USD","DOGE-USD"]
+
+# ---------------- UI ----------------
+st.title("📊 AI Trading Terminal")
+st.caption("Indian Market + Crypto | Professional Functional Base")
+
+tab1, tab2, tab3 = st.tabs(["🇮🇳 Indian Market", "🪙 Crypto Market", "📈 Market Browser"])
+
+# ---------------- INDIAN MARKET ----------------
+with tab1:
+    col1, col2 = st.columns([2,1])
+
+    with col1:
+        symbol = st.text_input("Enter NSE Stock (RELIANCE, TCS, INFY)", "RELIANCE")
+    with col2:
+        days = st.slider("Historical Days", 30, 1000, 180)
+
+    symbol = symbol.upper().strip()
+    if not symbol.endswith(".NS") and not symbol.startswith("^"):
+        symbol = symbol + ".NS"
+
+    df, used = load_data(symbol, days)
+
+    if used:
+        st.success(f"Live source: {used}")
 
     if df.empty:
-        st.error("No data found. Please check the NSE symbol.")
-        st.stop()
+        st.error("No market data received.")
+    else:
+        st.subheader("Price Chart")
+        st.line_chart(df["Close"])
 
-except Exception as e:
-    st.error("Failed to fetch data.")
-    st.code(str(e))
-    st.stop()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Last Price", round(df["Close"].iloc[-1],2))
+        c2.metric("Day High", round(df["High"].iloc[-1],2))
+        c3.metric("Day Low", round(df["Low"].iloc[-1],2))
 
-# ---------------- INDICATORS ---------------- #
-df["MA20"] = df["Close"].rolling(20).mean()
-df["MA50"] = df["Close"].rolling(50).mean()
-df = df.dropna()
+        st.subheader("Raw Market Data")
+        st.dataframe(df.tail(20), use_container_width=True)
 
-latest = df.iloc[-1]
-price = float(latest["Close"])
-ma20 = float(latest["MA20"])
-ma50 = float(latest["MA50"])
+# ---------------- CRYPTO MARKET ----------------
+with tab2:
+    crypto = st.selectbox("Select Crypto", CRYPTO)
+    days = st.slider("Days", 30, 1000, 180, key="crypto")
 
-# ---------------- PRICE CHART ---------------- #
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=df.index, y=df["Close"], name="Close", line=dict(width=2)))
-fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="MA20"))
-fig.add_trace(go.Scatter(x=df.index, y=df["MA50"], name="MA50"))
-fig.update_layout(title=f"{symbol} Price Chart", xaxis_title="Date", yaxis_title="Price (INR)")
-st.plotly_chart(fig, use_container_width=True)
+    df, used = load_data(crypto, days, "1d")
 
-# ---------------- MARKET METRICS ---------------- #
-c1, c2, c3 = st.columns(3)
-c1.metric("Current Price", f"₹ {price:,.2f}")
-c2.metric("MA20", f"₹ {ma20:,.2f}")
-c3.metric("MA50", f"₹ {ma50:,.2f}")
+    if df.empty:
+        st.error("Crypto data unavailable.")
+    else:
+        st.success(f"Source: {used}")
+        st.line_chart(df["Close"])
+        st.dataframe(df.tail(15), use_container_width=True)
 
-# ---------------- SIGNAL ENGINE ---------------- #
-signal = "HOLD"
-if ma20 > ma50:
-    signal = "BUY"
-elif ma20 < ma50:
-    signal = "SELL"
+# ---------------- MARKET BROWSER ----------------
+with tab3:
+    st.subheader("NIFTY 50 Snapshot")
 
-st.subheader("📌 System Signal")
+    market_data = {}
 
-if signal == "BUY":
-    st.success("🟢 BUY Signal")
-elif signal == "SELL":
-    st.error("🔴 SELL Signal")
-else:
-    st.warning("🟡 HOLD")
+    with st.spinner("Fetching market..."):
+        for stock in NIFTY50:
+            df, _ = load_data(stock, 7)
+            if not df.empty:
+                market_data[stock] = df["Close"].iloc[-1]
 
-# ---------------- RISK LEVELS ---------------- #
-stop_loss = price * 0.97
-take_profit = price * 1.05
+    if market_data:
+        market_df = pd.DataFrame(market_data.items(), columns=["Stock", "Last Price"])
+        st.dataframe(market_df, use_container_width=True)
 
-st.subheader("⚠ Risk Preview (example)")
+    st.subheader("Indices")
+    i1, _ = load_data("^NSEI", 30)
+    i2, _ = load_data("^NSEBANK", 30)
 
-r1, r2, r3 = st.columns(3)
-r1.metric("Current", f"₹ {price:,.2f}")
-r2.metric("Stop Loss", f"₹ {stop_loss:,.2f}")
-r3.metric("Take Profit", f"₹ {take_profit:,.2f}")
+    if not i1.empty:
+        st.write("NIFTY 50")
+        st.line_chart(i1["Close"])
 
-# ---------------- RAW DATA ---------------- #
-with st.expander("View Raw Market Data"):
-    st.dataframe(df.tail(30))
+    if not i2.empty:
+        st.write("BANK NIFTY")
+        st.line_chart(i2["Close"])
+
